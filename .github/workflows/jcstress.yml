@@ -28,13 +28,22 @@ jobs:
       - name: build
         run: mvn -B -q -f jcstress/pom.xml -DskipTests package
 
+      # one JVM config (-jvmArgs disables the flag matrix, which plans ~590 configs per test in stress mode and blows
+      # the 6h job limit), repeated so a rare reordering gets more chances; a FORBIDDEN hit fails the iteration, not the loop
       - name: jcstress
         run: |
           set -o pipefail
-          ARGS=""
-          if [ "${{ matrix.mode }}" = "nofence" ]; then ARGS="-jvmArgsPrepend -Ddeque.fillnofence=true"; fi
+          JVM="-XX:+UnlockDiagnosticVMOptions"
+          if [ "${{ matrix.mode }}" = "nofence" ]; then JVM="$JVM -Ddeque.fillnofence=true"; fi
           nproc
-          java -jar jcstress/target/jcstress.jar -t 'DequeStress\.Reuse' -m stress -r results $ARGS 2>&1 | tee jcstress.txt
+          rc=0
+          for i in 1 2 3 4 5; do
+            echo "=== iteration $i" | tee -a jcstress.txt
+            java -jar jcstress/target/jcstress.jar -t 'DequeStress\.(ReuseFillSet|ReuseFillResize|ReuseEndNegativeKey)' \
+              -m stress -jvmArgs "$JVM" -r results/$i 2>&1 | grep -v -E "^\((ETA|Sampling|JVMs|CPUs|Results):" | tee -a jcstress.txt || rc=1
+          done
+          grep -E "FAILED|FORBIDDEN|passed|failed" jcstress.txt | tail -40
+          exit $rc
 
       - uses: actions/upload-artifact@v4
         if: always()
