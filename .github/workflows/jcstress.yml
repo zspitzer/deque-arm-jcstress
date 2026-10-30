@@ -1,0 +1,45 @@
+name: jcstress
+
+# DequeArr slot-reuse tests on a weakly ordered CPU (arm64) against x86, with fill's storeStoreFence on (fenced) and
+# off (nofence, -Ddeque.fillnofence=true). Expected: nofence on arm64 shows FORBIDDEN outcomes for ReuseFill*, the
+# rest stay clean. A clean arm64 nofence run doesn't prove the fence is needed, only a hit does
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  jcstress:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-24.04-arm, ubuntu-24.04 ]
+        mode: [ fenced, nofence ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: build
+        run: mvn -B -q -f jcstress/pom.xml -DskipTests package
+
+      - name: jcstress
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ "${{ matrix.mode }}" = "nofence" ]; then ARGS="-jvmArgsPrepend -Ddeque.fillnofence=true"; fi
+          nproc
+          java -jar jcstress/target/jcstress.jar -t 'DequeStress\.Reuse' -m stress -r results $ARGS 2>&1 | tee jcstress.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jcstress-${{ matrix.os }}-${{ matrix.mode }}
+          path: |
+            jcstress.txt
+            results
