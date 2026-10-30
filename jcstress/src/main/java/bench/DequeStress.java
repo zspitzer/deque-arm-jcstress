@@ -426,6 +426,74 @@ public final class DequeStress {
 		}
 	}
 
+	// ---- middle inserts, as ArrayImpl.doInsert: shifted outward in place inside an odd epoch, or copied on growth ----
+
+	@JCStressTest
+	@Description("insert( 3, 9 ) on [0,1,2,3,4] with head 0 shifts the back side up one: [0,1,9,2,3,4]. Key 3 then key 4: 2 then 3 before, 9 then 2 after. 9 then 3 would be key 3 after and key 4 before.")
+	@Outcome(id = "2, 3", expect = ACCEPTABLE, desc = "both before the insert")
+	@Outcome(id = "2, 2", expect = ACCEPTABLE, desc = "the insert landed between the reads")
+	@Outcome(id = "9, 2", expect = ACCEPTABLE, desc = "both after the insert")
+	@State
+	public static class MiddleInsertBackVsGet {
+		final DequeArr a = of(0, 1, 2, 3, 4);
+
+		@Actor
+		public void writer() {
+			a.insert(3, 9);
+		}
+
+		@Actor
+		public void reader(II_Result r) {
+			r.r1 = code(a, 3);
+			r.r2 = code(a, 4);
+		}
+	}
+
+	@JCStressTest
+	@Description("[8,0,1,2,3,4] minus its first element has head 1, so insert( 2, 9 ) on [0,1,2,3,4] shifts the front side down into the tombstoned slot: [0,9,1,2,3,4]. Key 1 is 0 throughout; a reader with the old bounds sees 9 at key 1, and a tombstone must never leak.")
+	@Outcome(id = "0, 1", expect = ACCEPTABLE, desc = "key 2 before the insert")
+	@Outcome(id = "0, 9", expect = ACCEPTABLE, desc = "key 2 after the insert")
+	@State
+	public static class MiddleInsertFrontVsGet {
+		final DequeArr a = of(8, 0, 1, 2, 3, 4);
+
+		{
+			a.deleteAt(1);
+		}
+
+		@Actor
+		public void writer() {
+			a.insert(2, 9);
+		}
+
+		@Actor
+		public void reader(II_Result r) {
+			r.r1 = code(a, 1);
+			r.r2 = code(a, 2);
+		}
+	}
+
+	@JCStressTest
+	@Description("insert( 5, 9 ) on a full [0..9] (capacity 10, head 0) copies into a new grown holder: [0,1,2,3,9,4,5,6,7,8,9]. Key 5 then key 11: 4 and out of range before, 9 and 9 after.")
+	@Outcome(id = "4, -1", expect = ACCEPTABLE, desc = "both before the insert")
+	@Outcome(id = "4, 9", expect = ACCEPTABLE, desc = "the insert landed between the reads")
+	@Outcome(id = "9, 9", expect = ACCEPTABLE, desc = "both after the insert")
+	@State
+	public static class MiddleInsertGrowth {
+		final DequeArr a = of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+		@Actor
+		public void writer() {
+			a.insert(5, 9);
+		}
+
+		@Actor
+		public void reader(II_Result r) {
+			r.r1 = code(a, 5);
+			r.r2 = code(a, 11);
+		}
+	}
+
 	// ---- lazy lock ----
 
 	@JCStressTest

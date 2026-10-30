@@ -372,6 +372,53 @@ final class DequeArr implements Arr {
 		return v;
 	}
 
+	// insert before key, 1 .. size + 1, as ArrayImpl.doInsert: the ends append / prepend, a middle insert shifts the
+	// shorter side outward into the slack inside an odd epoch, or copies into a new grown holder when there's none
+	void insert(int key, Object value) {
+		lock();
+		try {
+			Holder x = h;
+			long b = x.bounds;
+			int head = head(b), end = end(b), n = end - head;
+			if (key < 1 || key > n + 1) throw Arr.outOfRange(key, n);
+			if (key == n + 1 || key == 1) {
+				if (key == 1) prepend(value);
+				else append(value);
+				return;
+			}
+			Object[] d = x.data;
+			int front = key - 1, back = n - front;
+			boolean left = head > 0 && (front <= back || end == d.length);
+			if (!left && end == d.length) {
+				Object[] nd = new Object[Math.max(d.length, n + slack(n))];
+				System.arraycopy(d, head, nd, 0, front);
+				nd[front] = value;
+				System.arraycopy(d, head + front, nd, front + 1, back);
+				h = new Holder(nd, 0, n + 1);
+				return;
+			}
+			int e = x.epoch;
+			EPOCH.setOpaque(x, e + 1);
+			// the odd epoch must be visible before any shifted slot, as StampedLock.tryAcquireWrite
+			VarHandle.storeStoreFence();
+			if (left) {
+				System.arraycopy(d, head, d, head - 1, front);
+				AA.setRelease(d, head - 1 + front, value);
+				BOUNDS.setRelease(x, pack(head - 1, end));
+			}
+			else {
+				int i = head + front;
+				System.arraycopy(d, i, d, i + 1, back);
+				AA.setRelease(d, i, value);
+				BOUNDS.setRelease(x, pack(head, end + 1));
+			}
+			EPOCH.setRelease(x, e + 2);
+		}
+		finally {
+			unlock();
+		}
+	}
+
 	// arr[ key ] = value; past the end pads with null and appends as one op, as ArrayImpl.doPut
 	void set(int key, Object value) {
 		if (key < 1) throw Arr.outOfRange(key, size());

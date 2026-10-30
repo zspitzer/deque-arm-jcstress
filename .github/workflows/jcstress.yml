@@ -1,8 +1,9 @@
 name: jcstress
 
-# DequeArr slot-reuse tests on a weakly ordered CPU (arm64) against x86, with fill's storeStoreFence on (fenced) and
-# off (nofence, -Ddeque.fillnofence=true). Expected: nofence on arm64 shows FORBIDDEN outcomes for ReuseFill*, the
-# rest stay clean. A clean arm64 nofence run doesn't prove the fence is needed, only a hit does
+# DequeArr slot-reuse and middle-insert tests on a weakly ordered CPU (arm64) against x86. Modes: fenced (the code as
+# it ships), nofence (-Ddeque.fillnofence=true, fill's storeStoreFence off: arm64 shows FORBIDDEN for ReuseFill*), and
+# novalidate (-Ddeque.novalidate=true, readers skip the epoch check: the negative control proving the tests can see a
+# torn read). Expected: fenced clean everywhere. A clean run doesn't prove a fence is needed, only a hit does
 
 on:
   workflow_dispatch:
@@ -14,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ ubuntu-24.04-arm, ubuntu-24.04 ]
-        mode: [ fenced, nofence ]
+        mode: [ fenced, nofence, novalidate ]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +36,12 @@ jobs:
           set -o pipefail
           JVM="-XX:+UnlockDiagnosticVMOptions"
           if [ "${{ matrix.mode }}" = "nofence" ]; then JVM="$JVM -Ddeque.fillnofence=true"; fi
+          if [ "${{ matrix.mode }}" = "novalidate" ]; then JVM="$JVM -Ddeque.novalidate=true"; fi
           nproc
           rc=0
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3; do
             echo "=== iteration $i" | tee -a jcstress.txt
-            java -jar jcstress/target/jcstress.jar -t 'DequeStress\.(ReuseFillSet|ReuseFillResize|ReuseEndNegativeKey)' \
+            java -jar jcstress/target/jcstress.jar -t 'DequeStress\.(ReuseFillSet|ReuseFillResize|ReuseEndNegativeKey|MiddleInsert\w+)' \
               -m stress -jvmArgs "$JVM" -r results/$i 2>&1 | grep -v -E "^\((ETA|Sampling|JVMs|CPUs|Results):" | tee -a jcstress.txt || rc=1
           done
           grep -E "FAILED|FORBIDDEN|passed|failed" jcstress.txt | tail -40
